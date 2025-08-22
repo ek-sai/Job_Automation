@@ -1,0 +1,417 @@
+{
+  "name": "My workflow 2",
+  "nodes": [
+    {
+      "parameters": {
+        "fieldToSplitOut": "links",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        432,
+        -48
+      ],
+      "id": "e0ee15c3-b6bf-4d2a-8ce1-4d60d072762f",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -272,
+        224
+      ],
+      "id": "0d362179-3d03-471b-a230-acfcf5d4f808",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "o3-mini-2025-01-31",
+          "mode": "list",
+          "cachedResultName": "O3-MINI-2025-01-31"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Hi, you are a helpful job matcher, you analyze the given resume and job description and providing a job matching score in a json format \n\n\nfor example \n\nyour response should be like\n{\"job_match_score\": 80 }\n\nmake sure you give project json data, dont give any json markdown text and all\n\nmy resume:\n{{ $('resume').item.json.resume }}\n\n\njob_description: \n\n {{ $json.jd }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        528,
+        416
+      ],
+      "id": "8efae9c9-b73d-460a-ae35-ddaf407a4ea2",
+      "name": "OpenAI",
+      "credentials": {
+        "openAiApi": {
+          "id": "{{ $env.OPENAI_CREDENTIAL_ID }}",
+          "name": "OpenAI API Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://www.linkedin.com/jobs/search/?keywords=machine%20learning%20engineer&f_E=2%2C4&f_TPR=r86400&geoId=103644278&start=0",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -192,
+        -48
+      ],
+      "id": "24b750dd-6a84-4807-9fef-d590016201b8",
+      "name": "Scrape Last 24 hours Job"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfrom urllib.parse import urlparse, urlunparse\nfrom bs4 import BeautifulSoup\n\n\nhtml = _input.all()[0]['json']['data']\nsoup = BeautifulSoup(html, 'html.parser')\n\njob_links = soup.select('ul.jobs-search__results-list li div a[class*=\"base-card\"]')\n\n\n\njob_urls = []\nfor a_tag in job_links:\n    href = a_tag.get('href')\n    if href:\n\n        parsed = urlparse(href)\n        parsed_new = parsed._replace(netloc=\"www.linkedin.com\")\n        new_url = urlunparse(parsed_new)\n        job_urls.append(new_url)\n\n\n\n\nreturn {\"links\": job_urls}\n\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        -48
+      ],
+      "id": "251c6596-0def-4d9f-9bf3-194ad363ed75",
+      "name": "Extract Job Links"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.links }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        160,
+        240
+      ],
+      "id": "7252c1d5-6634-4822-8587-85720a627d47",
+      "name": "Scrape Each Job",
+      "retryOnFail": true,
+      "executeOnce": false,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "from bs4 import BeautifulSoup\n\n\nhtml = _input.all()[0]['json']['data']\nsoup = BeautifulSoup(html, 'html.parser')\n\ntitle = soup.select('div h1')[0].text\ncompany = soup.select('div span a')[0].text.strip()\n\nlocation = soup.select(\"div span[class*='topcard__flavor topcard__flavor--bullet']\")[0].text.strip()\n\njd_container = soup.find(\"div\", class_=\"description__text description__text--rich\")\n\nif jd_container:\n    \n  complete_jd = jd_container.get_text(separator=\"\\n\", strip=True)\n    \nelse:\n    company_jd = \"no jd\"\n\n\nurns = [a.get(\"data-semaphore-content-urn\") for a in soup.select(\"a[data-item-type='semaphore']\")]\n\njob_id =urns[0].split(\":\")[-1]\n\n\napply_link = \"https://www.linkedin.com/jobs/view/\" + job_id\napply_link\n\n\nreturn {\n  \"title\": title,\n  \"company\": company,\n  \"location\": location,\n  \"jd\": complete_jd,\n  \"link\": apply_link\n  \n  \n}\n\n\n\n\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        240
+      ],
+      "id": "2ee8de71-4c8d-4f9e-854a-b3bff0f77210",
+      "name": "Parse"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "=\n {{ $json.message.content }}",
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -272,
+        400
+      ],
+      "id": "1591dcc0-ab37-4112-ac2f-f13cfaa04141",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -32,
+        240
+      ],
+      "id": "fd119ccd-1493-4a46-8fa6-ccbfec3109a7",
+      "name": "Wait",
+      "webhookId": "c9cb4878-ae4d-4b8e-bd37-5395011f7761"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -720,
+        -48
+      ],
+      "id": "dc8c14f8-053e-4d8a-a806-0a62211b75f6",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1499f1ac-a7ae-4983-85c7-aa7b8445b2e2",
+              "leftValue": "={{ $json.job_match_score }}",
+              "rightValue": 75,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -48,
+        400
+      ],
+      "id": "a0e24c22-1a27-49e6-901f-3e8e0ad43772",
+      "name": "Score Filter"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "500890d8-f9a0-4075-8419-664c13f9428f",
+              "name": "resume",
+              "value": "Eswar Sai Korrapati Open To Relocate | 551-344-5356 | eksai0726@gmail.com |https://www.linkedin.com/in/eswarsaikorrapati/ | https://github.com/ek-sai |https://eswarsaiportfolio.org/ |  Professional Summary Results-driven Software engineer having 3 years of experience with deep expertise in building and deploying scalable ML models using MLflow, SageMaker, and DVC. Skilled in designing end-to-end ML pipelines, enabling reproducibility and automation with MLOps frameworks. Strong experience integrating LLMs via OpenAI API, building transformer-based NLP models, and deploying explainable AI systems with SHAP/LIME. Adept at optimizing model performance, orchestrating workflows with Airflow, and managing large-scale data processing using Spark and AWS.  Professional Experience Software Engineer – AI/ML Comcast, San Jose, CA Aug 2024 – Present Designed and deployed production-grade ML models using TensorFlow and PyTorch, improving prediction accuracy by 20% in real-time streaming systems. Built reproducible ML workflows using Apache Airflow, MLflow, and DVC, enabling versioned pipelines and consistent experiment tracking. Deployed models using AWS SageMaker and Lambda, cutting infrastructure costs by 15% and reducing deployment time by 35%. Applied SHAP and LIME to create explainability dashboards, aiding stakeholders in data-driven decision-making and regulatory compliance. Automated hyperparameter tuning using SageMaker Autopilot and Optuna, leading to an 18% improvement in model F1 score. Built scalable batch inference pipelines with Apache Spark and AWS S3, reducing inference time by 25% across large datasets. Integrated LLM-based chat capabilities using OpenAI API and prompt engineering, enhancing customer support response automation. Collaborated in Agile teams using Git, Docker, and Jenkins to streamline CI/CD across ML development lifecycles. Stack: Python, TensorFlow, PyTorch, MLflow, SageMaker, DVC, Airflow, OpenAI API, Spark, AWS (S3, Lambda, CloudWatch), Docker, Git, Optuna, SHAP, LIME Software Engineer Dentsu, Hyderabad, India May 2020 – Jul 2022 Engineered RESTful APIs and backend logic using Django and Flask, increasing system throughput and API response efficiency. Developed automated ML workflows using Apache Airflow, improving pipeline reliability and scheduling across data ingestion tasks. Containerized and deployed web services via Docker and AWS EC2, achieving high availability and faster deployment cycles. Built a centralized Feature Store to standardize feature reuse across models, improving experimentation speed and consistency. Leveraged AutoML tools for ad campaign forecasting, reducing manual tuning time by 40% and improving prediction accuracy. Integrated model evaluation metrics (AUC, Precision, Recall, F1 Score) and visualization tools like Tableau to enhance stakeholder reporting. Managed cloud resources using AWS, automated deployments with Jenkins, and versioned projects via Git and GitHub Actions. Stack: Python, Flask, Django, SQL, MongoDB, AutoML, Airflow, Feature Store, Docker, Jenkins, Git, AWS EC2, Tableau  Education M.S. in Computer Science Montclair State University, NJ                                                                                                           Graduated: May 2024 | GPA: 3.65  Projects  RAG-based PDF Summarizer Built a PDF summarization tool using LangChain, OpenAI API, and FAISS for retrieval-augmented generation. Deployed using Streamlit, supporting semantic search, chunking, and real-time user interaction.  Next Word Prediction with BERT Fine-tuned a BERT transformer model using PyTorch, achieving 92% top-5 prediction accuracy. Machine Transliteration Designed and implemented a custom encoder-decoder model using PyTorch for sequence-to-sequence tasks, supporting variable-length inputs and outputs.  Technical Skills Programming Languages: Python, C++, SQL, JavaScript AI/ML & NLP: TensorFlow, PyTorch, Scikit-learn, Keras, BERT, Transformers, GPT, Hugging Face, LangChain, LangGraph MLOps & Deployment: MLflow, SageMaker, DVC, Airflow, Docker, Kubernetes, CI/CD, Feature Store, Jenkins Explainability & Evaluation: SHAP, LIME, AUC, Precision, Recall, F1 Score, Confusion Matrix Cloud & DevOps: AWS (S3, EC2, Lambda, SageMaker, CloudWatch), GitHub Actions Data & Processing: Apache Spark, Pandas, NumPy, MongoDB, MySQL, Tableau LLMs & APIs: OpenAI API, Prompt Engineering, LangChain, FastAPI, REST APIs Tools & Collaboration: Git, Jupyter, Streamlit, Agile, IntelliJ, VS Code Core CS: Data Structures and Algorithms",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -496,
+        -48
+      ],
+      "id": "6a98a4b8-976d-4c3a-bec6-90b6759fa85b",
+      "name": "resume"
+    },
+    {
+      "parameters": {
+        "chatId": "6503255687",
+        "text": "=\n\n\n\n\n\nTitle: {{ $('Parse').item.json.title }}\nCompany: {{ $('Parse').item.json.company }}\nLocation: {{ $('Parse').item.json.location }}\nJob Score: {{ $('Edit Fields').item.json.job_match_score }}\nApply: {{ $('Parse').item.json.link }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        272,
+        400
+      ],
+      "id": "29a7cde4-be9f-43f0-9fac-9e6dfc9b934f",
+      "name": "Send a text message",
+      "webhookId": "17b9ebe8-c8d4-4bd9-ad20-45842ddc2c00",
+      "credentials": {
+        "telegramApi": {
+          "id": "{{ $env.TELEGRAM_CREDENTIAL_ID }}",
+          "name": "Telegram API Credentials"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Last 24 hours Job": {
+      "main": [
+        [
+          {
+            "node": "Extract Job Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Job Links": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Each Job": {
+      "main": [
+        [
+          {
+            "node": "Parse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse": {
+      "main": [
+        [
+          {
+            "node": "OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Score Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Scrape Each Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "resume",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Filter": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "resume": {
+      "main": [
+        [
+          {
+            "node": "Scrape Last 24 hours Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "170b6ed8-eb17-4c81-bb84-266ba0831d39",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d5812632ee6ed72dfd5ee9227773feca96dbc5d099c19238ecbeb108e4d20d6d"
+  },
+  "id": "rxjLIwCmqgGNqFgS",
+  "tags": []
+}

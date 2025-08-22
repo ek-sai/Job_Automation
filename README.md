@@ -32,12 +32,18 @@ PG_PORT=your_actual_port
 # OpenAI API Key (for AI-powered job matching)
 OPENAI_API_KEY=sk-your-actual-openai-key-here
 
+# OpenAI Credential ID (for N8N workflow)
+OPENAI_CREDENTIAL_ID=your_actual_openai_credential_id_here
+
 # Hunter.io API Key (for finding company emails)
 HUNTER_API_KEY=your_actual_hunter_key_here
 
 # Telegram Bot Token (for notifications)
 TELEGRAM_BOT_TOKEN=your_actual_bot_token_here
 TELEGRAM_CHAT_ID=your_actual_chat_id_here
+
+# Telegram Credential ID (for N8N workflow)
+TELEGRAM_CREDENTIAL_ID=your_actual_telegram_credential_id_here
 ```
 
 #### N8N Configuration
