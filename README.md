@@ -90,6 +90,7 @@ job-automation/
 ├── env.example            # Example environment file
 ├── docker-compose.yml     # Docker services configuration
 ├── Final_Working.json     # Main workflow
+└── telegram.json          # Telegram Notifications workflow
 ├── workflow_with_db.json  # Database-integrated workflow
 ├── database_schema.sql    # Database setup script
 └── README.md              # This file
