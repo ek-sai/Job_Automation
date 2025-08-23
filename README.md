@@ -275,14 +275,12 @@ docker-compose restart n8n
 job-automation/
 ├── 📄 README.md              # This documentation
 ├── 🐳 docker-compose.yml     # Service orchestration  
-├── ⚙️ .env.example           # Environment template
-├── 🔄 workflows/
-│   ├── Final_Working.json    # Main automation workflow
-│   ├── workflow_with_db.json # Database integration
-│   └── telegram.json         # Notification workflow
-├── 🗄️ database/
-│   └── schema.sql            # Database setup script
-└── 📚 docs/                  # Additional documentation
+├── ⚙️ env.example            # Environment template
+├── 🔄 Final_Working.json     # Main automation workflow
+├── 🔄 workflow_with_db.json  # Database-integrated workflow  
+├── 🔔 telegram.json          # Telegram notification workflow
+├── 🗄️ database_schema.sql    # PostgreSQL database setup
+└── 🙈 .gitignore            # Git ignore rules
 ```
 
 ---
