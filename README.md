@@ -1,4 +1,4 @@
-# 🎯 Automated Job Application Systems
+# 🎯 Automated Job Application System
 
 > **Streamline your job search with AI-powered automation**  
 > Automatically scrape job postings, match them to your profile, find recruiter emails, and send personalized applications.
@@ -9,12 +9,14 @@
 
 | Feature | Description |
 |---------|-------------|
-| 🔍 **Smart Job Scraping** | Automatically searches LinkedIn for relevant positions |
-| 🤖 **AI-Powered Matching** | Uses OpenAI to score job compatibility with your resume |
-| 📧 **Email Discovery** | Finds recruiter emails using Hunter.io API |
-| 📝 **Personalized Applications** | Generates custom cover letters for each position |
-| 💾 **Database Tracking** | Tracks applications, responses, and follow-ups |
-| 📱 **Telegram Notifications** | Real-time alerts for high-scoring job matches |
+| 🔍 **Smart Job Scraping** | Daily LinkedIn scraping for Machine Learning Engineer positions |
+| 🤖 **AI-Powered Matching** | OpenAI O3-Mini scores job compatibility (0-100 scale) |
+| 📧 **Dual Email Discovery** | Hunter.io searches HR contacts first, falls back to general emails |
+| 📝 **Gmail Draft Generation** | Creates personalized application drafts (no auto-send) |
+| 💾 **Comprehensive Tracking** | PostgreSQL database with contact history & response rates |
+| 📱 **Telegram Notifications** | Instant alerts for jobs scoring 75+ match rating |
+| 🛡️ **Smart Filtering** | Blocks recruitment agencies & security clearance requirements |
+| ⏰ **Contact Management** | 30-day cooldown, max 3 contacts per company |
 
 ---
 
@@ -98,18 +100,49 @@ Update the resume content in the workflow nodes to match your profile:
 ## 📊 Workflow Overview
 
 ```mermaid
-graph LR
-    A[Schedule Trigger] --> B[Scrape LinkedIn Jobs]
-    B --> C[Extract Job Links] 
-    C --> D[Parse Job Details]
-    D --> E[AI Job Matching]
-    E --> F{Score ≥ 75?}
-    F -->|Yes| G[Find Recruiter Email]
-    F -->|No| H[Skip Job]
-    G --> I[Generate Personalized Email]
-    I --> J[Send Application]
-    J --> K[Log to Database]
-    K --> L[Telegram Notification]
+graph TD
+    A[Schedule Trigger - 7 AM Daily] --> B[Load Resume Data]
+    B --> C[Scrape LinkedIn Jobs - Last 24h]
+    C --> D[Extract Job Links with BeautifulSoup]
+    D --> E[Split Out Individual Job Links]
+    E --> F[Loop Over Each Job]
+    F --> G[Wait 10s Between Requests]
+    G --> H[Scrape Individual Job Page]
+    H --> I[Parse Job Details & Filter]
+    I --> J{Company Blacklisted?}
+    J -->|Yes - Skip| K[Continue to Next Job]
+    J -->|No| L{Security Clearance Required?}
+    L -->|Yes - Skip| K
+    L -->|No| M[AI Job Matching - OpenAI O3-Mini]
+    M --> N{Match Score ≥ 75?}
+    N -->|No - Skip| K
+    N -->|Yes| O[Send Telegram Notification]
+    O --> P[Map Company to Domain]
+    P --> Q[Hunter.io HR Email Search]
+    Q --> R[Extract Highest Confidence Email]
+    R --> S{HR Email Found?}
+    S -->|No| T[Hunter.io General Domain Search]
+    T --> U[Extract Best General Email]
+    U --> V{General Email Found?}
+    S -->|Yes| W[Check Email Contact History]
+    V -->|Yes| W
+    V -->|No - Skip| K
+    W --> X{Last Contact >30 Days & <3 Total Contacts?}
+    X -->|No - Skip| K
+    X -->|Yes| Y[Store/Update Email Contact]
+    Y --> Z[Check if Job Already Exists]
+    Z --> AA{Job Exists in DB?}
+    AA -->|No| BB[Insert New Job Record]
+    AA -->|Yes| CC[Get Existing Job ID]
+    BB --> DD[Generate Personalized Email with OpenAI]
+    CC --> DD
+    DD --> EE[Create Gmail Draft]
+    EE --> FF[Log Application to Database]
+    FF --> GG[Update Contact Record - Increment Count]
+    GG --> K
+    K --> HH{More Jobs to Process?}
+    HH -->|Yes| F
+    HH -->|No| II[Workflow Complete]
 ```
 
 ---
@@ -127,18 +160,48 @@ The system creates and manages these tables:
 
 ## 🛠️ Customization
 
-### Job Filtering
-Modify the filtering criteria in the workflow:
-- **Location preferences**
-- **Company blacklist** (recruitment agencies)
-- **Required keywords**
-- **Security clearance requirements**
+### Job Filtering & Safety Features
+The workflow includes sophisticated filtering to ensure quality and compliance:
 
-### Email Templates  
-Customize the AI prompt for generating cover letters:
-- **Tone and style**
-- **Key skills to highlight**
-- **Call-to-action preferences**
+**Company Blacklist:**
+- Recruitment agencies: `jobright.ai`, `lensa`, `jobs via dice`, `mercor`, `Robert Half`,`micro1`
+- Automatically skips these to focus on direct company opportunities
+
+**Security Clearance Detection:**
+Automatically filters out jobs requiring:
+- US citizenship or permanent residency
+- Security clearances (Secret, Top Secret, TS/SCI)
+- Government contractor positions
+- DOD clearance requirements
+
+**Contact Rate Limiting:**
+- Maximum 3 contact attempts per company
+- 30-day cooldown period between contacts
+- Tracks response rates and contact history
+- Prevents spam and maintains professional reputation
+
+### Email Templates & AI Generation
+The system uses OpenAI's ChatGPT-4o-Latest to create personalized applications:
+
+**Template Structure:**
+- Subject line with job title and key qualification
+- Professional opening referencing specific position
+- 2-3 relevant qualifications matching job requirements
+- Quantifiable achievements from resume
+- Professional closing with portfolio links
+
+**Customizable Elements:**
+- Tone and writing style preferences
+- Key skills and technologies to emphasize
+- Industry-specific terminology
+- Call-to-action preferences
+- Professional links formatting
+
+**Safety Features:**
+- Creates Gmail **drafts only** - no automatic sending
+- Manual review required before sending
+- JSON response validation
+- Error handling for AI generation failures
 
 ### Notification Settings
 Configure Telegram alerts for:
