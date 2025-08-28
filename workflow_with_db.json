@@ -1,0 +1,1693 @@
+{
+  "name": "workflow_with_db_cred",
+  "nodes": [
+    {
+      "parameters": {
+        "fieldToSplitOut": "links",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1168,
+        0
+      ],
+      "id": "ce5789e2-63f6-4cec-94ab-74975f360047",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        496,
+        272
+      ],
+      "id": "c3cac958-d3e8-4d22-b254-eb7384b44daa",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "url": "https://www.linkedin.com/jobs/search/?keywords=machine%20learning%20engineer&location=United%20States&f_TPR=r3600",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        544,
+        0
+      ],
+      "id": "fdfecabc-afda-407b-a0ef-bad2c34af257",
+      "name": "Scrape Last 24 hours Job"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfrom urllib.parse import urlparse, urlunparse\nfrom bs4 import BeautifulSoup\n\n\nhtml = _input.all()[0]['json']['data']\nsoup = BeautifulSoup(html, 'html.parser')\n\njob_links = soup.select('ul.jobs-search__results-list li div a[class*=\"base-card\"]')\n\n\n\njob_urls = []\nfor a_tag in job_links:\n    href = a_tag.get('href')\n    if href:\n\n        parsed = urlparse(href)\n        parsed_new = parsed._replace(netloc=\"www.linkedin.com\")\n        new_url = urlunparse(parsed_new)\n        job_urls.append(new_url)\n\n\n\n\nreturn {\"links\": job_urls}\n\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        0
+      ],
+      "id": "07bd0a72-89dd-4cdd-b738-61b1a52bbd91",
+      "name": "Extract Job Links"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.links }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        896,
+        288
+      ],
+      "id": "16810674-1ca2-4f4a-a541-708878191ee1",
+      "name": "Scrape Each Job",
+      "retryOnFail": true,
+      "executeOnce": false,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "from bs4 import BeautifulSoup\nimport re\n\nhtml = _input.all()[0]['json']['data']\nsoup = BeautifulSoup(html, 'html.parser')\n\n# Security clearance and citizenship keywords to filter out\nclearance_keywords = [\n    'security clearance', 'clearance required', 'clearance eligible',\n    'top secret', 'ts clearance', 'secret clearance', 'ts/sci',\n    'polygraph', 'poly', 'dod clearance', 'government clearance',\n    'active clearance', 'current clearance', 'must have clearance',\n    'us citizen', 'u.s. citizen', 'us citizenship', 'u.s. citizenship',\n    'green card', 'permanent resident', 'citizenship required', 'must be us citizen', 'us persons only'\n]\n\ntry:\n    title = soup.select('div h1')[0].text\n    \n    # Try to get company name, skip if unable to extract\n    company_elements = soup.select('div span a')\n    if not company_elements:\n        return [{\"continue\": True}]   # unable to get company name Ã¢â€ ' skip\n    \n    company = company_elements[0].text.strip()\n    if not company:  # if company name is empty after stripping\n        return [{\"continue\": True}]   # unable to get company name Ã¢â€ ' skip\n    \n    # If company is in skip list Ã¢â€ ' act like \"continue\"\n    if company.lower() in [\"jobright.ai\", \"lensa\", \"jobs via dice\",\"mercor\",\"Robert Half\",\"micro1\"]:\n        return [{\"continue\": True}]   # marker object\n    \n    location = soup.select(\"div span[class*='topcard__flavor topcard__flavor--bullet']\")[0].text.strip()\n    \n    jd_container = soup.find(\"div\", class_=\"description__text description__text--rich\")\n    complete_jd = jd_container.get_text(separator=\"\\n\", strip=True) if jd_container else \"no jd\"\n    \n    # Check for security clearance or citizenship requirements - same pattern as company filter\n    if any(keyword in complete_jd.lower() for keyword in clearance_keywords):\n        return [{\"continue\": True}]   # skip jobs with clearance/citizenship requirements\n    \n    urns = [a.get(\"data-semaphore-content-urn\") for a in soup.select(\"a[data-item-type='semaphore']\")]\n    if not urns or not urns[0]:\n        return [{\"continue\": True}]   # no job id Ã¢â€ ' skip like continue\n    \n    job_id = urns[0].split(\":\")[-1]\n    apply_link = \"https://www.linkedin.com/jobs/view/\" + job_id\n    \n    return [{\n        \"title\": title,\n        \"company\": company,\n        \"location\": location,\n        \"jd\": complete_jd,\n        \"link\": apply_link,\n        \"continue\": False\n    }]\nexcept Exception as e:\n    return [{\"continue\": True, \"error\": str(e)}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        288
+      ],
+      "id": "cdac4c51-2153-4c94-9de8-5c7aac7dd289",
+      "name": "Parse"
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        704,
+        288
+      ],
+      "id": "965fa8c4-f208-4572-95bb-21d12480d921",
+      "name": "Wait",
+      "webhookId": "c9cb4878-ae4d-4b8e-bd37-5395011f7761"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d8435a84-5e83-47b2-800b-1b2035b3f570",
+              "leftValue": "={{ $json.continue }}",
+              "rightValue": "false",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1280,
+        288
+      ],
+      "id": "9bbf32e0-01b6-42e9-9911-63eada53e79e",
+      "name": "Company Filter"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "500890d8-f9a0-4075-8419-664c13f9428f",
+              "name": "resume",
+              "value": "Eswar Sai Korrapati Open To Relocate | 551-344-5356 | eksai0726@gmail.com | https://www.linkedin.com/in/eswarsaikorrapati/ | https://github.com/ek-sai | https://eswarsaiportfolio.org/ | Professional Summary: Results-driven Software engineer having 3 years of experience with deep expertise in building and deploying scalable ML models using MLflow, SageMaker, and DVC. Skilled in designing end-to-end ML pipelines, enabling reproducibility and automation with MLOps frameworks. Strong experience integrating LLMs via OpenAI API, building transformer-based NLP models, and deploying explainable AI systems with SHAP/LIME. Adept at optimizing model performance, orchestrating workflows with Airflow, and managing large-scale data processing using Spark and AWS. Professional Experience: Software Engineer - AI/ML Comcast, San Jose, CA Aug 2024 - Present. Designed and deployed production-grade ML models using TensorFlow and PyTorch, improving prediction accuracy by 20% in real-time streaming systems. Built reproducible ML workflows using Apache Airflow, MLflow, and DVC, enabling versioned pipelines and consistent experiment tracking. Deployed models using AWS SageMaker and Lambda, cutting infrastructure costs by 15% and reducing deployment time by 35%. Applied SHAP and LIME to create explainability dashboards, aiding stakeholders in data-driven decision-making and regulatory compliance. Automated hyperparameter tuning using SageMaker Autopilot and Optuna, leading to an 18% improvement in model F1 score. Built scalable batch inference pipelines with Apache Spark and AWS S3, reducing inference time by 25% across large datasets. Integrated LLM-based chat capabilities using OpenAI API and prompt engineering, enhancing customer support response automation. Collaborated in Agile teams using Git, Docker, and Jenkins to streamline CI/CD across ML development lifecycles. Stack: Python, TensorFlow, PyTorch, MLflow, SageMaker, DVC, Airflow, OpenAI API, Spark, AWS (S3, Lambda, CloudWatch), Docker, Git, Optuna, SHAP, LIME. Software Engineer Dentsu, Hyderabad, India May 2020 - Jul 2022. Engineered RESTful APIs and backend logic using Django and Flask, increasing system throughput and API response efficiency. Developed automated ML workflows using Apache Airflow, improving pipeline reliability and scheduling across data ingestion tasks. Containerized and deployed web services via Docker and AWS EC2, achieving high availability and faster deployment cycles. Built a centralized Feature Store to standardize feature reuse across models, improving experimentation speed and consistency. Leveraged AutoML tools for ad campaign forecasting, reducing manual tuning time by 40% and improving prediction accuracy. Integrated model evaluation metrics (AUC, Precision, Recall, F1 Score) and visualization tools like Tableau to enhance stakeholder reporting. Managed cloud resources using AWS, automated deployments with Jenkins, and versioned projects via Git and GitHub Actions. Stack: Python, Flask, Django, SQL, MongoDB, AutoML, Airflow, Feature Store, Docker, Jenkins, Git, AWS EC2, Tableau. Education: M.S. in Computer Science Montclair State University, NJ Graduated: May 2024 | GPA: 3.65. Projects: RAG-based PDF Summarizer Built a PDF summarization tool using LangChain, OpenAI API, and FAISS for retrieval-augmented generation. Deployed using Streamlit, supporting semantic search, chunking, and real-time user interaction. Next Word Prediction with BERT Fine-tuned a BERT transformer model using PyTorch, achieving 92% top-5 prediction accuracy. Machine Transliteration Designed and implemented a custom encoder-decoder model using PyTorch for sequence-to-sequence tasks, supporting variable-length inputs and outputs. Technical Skills: Programming Languages: Python, C++, SQL, JavaScript. AI/ML & NLP: TensorFlow, PyTorch, Scikit-learn, Keras, BERT, Transformers, GPT, Hugging Face, LangChain, LangGraph. MLOps & Deployment: MLflow, SageMaker, DVC, Airflow, Docker, Kubernetes, CI/CD, Feature Store, Jenkins. Explainability & Evaluation: SHAP, LIME, AUC, Precision, Recall, F1 Score, Confusion Matrix. Cloud & DevOps: AWS (S3, EC2, Lambda, SageMaker, CloudWatch), GitHub Actions. Data & Processing: Apache Spark, Pandas, NumPy, MongoDB, MySQL, Tableau. LLMs & APIs: OpenAI API, Prompt Engineering, LangChain, FastAPI, REST APIs. Tools & Collaboration: Git, Jupyter, Streamlit, Agile, IntelliJ, VS Code. Core CS: Data Structures and Algorithms",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        0
+      ],
+      "id": "7c894ef7-a21a-4503-b32a-678ddd39baab",
+      "name": "resume"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "ed326d10-d963-4d19-9656-ff635caa764f",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "o3-mini-2025-01-31",
+          "mode": "list",
+          "cachedResultName": "O3-MINI-2025-01-31"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Hi, you are a helpful job matcher, you analyze the given resume and job description and providing a job matching score in a json format \n\n\nfor example \n\nyour response should be like\n{\"job_match_score\": 80 }\n\nmake sure you give project json data, dont give any json markdown text and all\n\nmy resume:\n{{ $('resume').item.json.resume }}\n\n\njob_description: \n\n {{ $json.jd }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        1504,
+        272
+      ],
+      "id": "10b10726-c28c-4c16-b4d4-fd006bc1f24e",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "YOUR_OPENAI_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1adbf2e2-4f6c-4f87-845b-751a9264d4af",
+              "name": "message.content",
+              "value": "={{ $json.message.content }}",
+              "type": "string"
+            },
+            {
+              "id": "3cf64224-4913-4db6-978f-e1be6e50adfe",
+              "name": "company",
+              "value": "={{ $('Company Filter').item.json.company }}",
+              "type": "string"
+            },
+            {
+              "id": "4a103ed9-e666-43cc-b476-844794c0cb6c",
+              "name": "job_match_score",
+              "value": "={{ JSON.parse($json.message.content).job_match_score }}",
+              "type": "number"
+            },
+            {
+              "id": "576635a7-8c66-49f4-8fd6-57192d89ed37",
+              "name": "title",
+              "value": "={{ $('Company Filter').item.json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "c64de9fe-32e7-4bd9-b4af-36bb81ad0cff",
+              "name": "link",
+              "value": "={{ $('Company Filter').item.json.link }}",
+              "type": "string"
+            },
+            {
+              "id": "d077b68-fc17-4376-9bd1-00fd70f13fca",
+              "name": "location",
+              "value": "={{ $('Company Filter').item.json.location }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1776,
+        272
+      ],
+      "id": "b46524d1-10b7-4f29-bb71-abf717dead30",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1499f1ac-a7ae-4983-85c7-aa7b8445b2e2",
+              "leftValue": "={{ $json.job_match_score }}",
+              "rightValue": 75,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1968,
+        272
+      ],
+      "id": "68ff6ccc-63d9-4db6-94ba-fab4f707a4be",
+      "name": "Score Filter"
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=\n\n\n\n\n\nTitle: {{ $json.title }}\nCompany: {{ $json.company }}\nLocation: {{ $json.location }}\nJob Score: {{ $json.job_match_score }}\nApply: {{ $json.link }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2208,
+        256
+      ],
+      "id": "9633efc4-382a-46fa-bedc-41be2d10700d",
+      "name": "Send a text message",
+      "webhookId": "17b9ebe8-c8d4-4bd9-ad20-45842ddc2c00",
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "YOUR_TELEGRAM_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Domain Mapper').item.json.hunter_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2592,
+        256
+      ],
+      "id": "415d264a-0598-4468-9f9f-889202ad1535",
+      "name": "Hunter Domain Search"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM companies WHERE name = $1",
+        "options": {
+          "queryReplacement": "={{ $('Edit Fields').item.json.company }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        2272,
+        608
+      ],
+      "id": "9966a920-6571-4cf7-881d-533deb408016",
+      "name": "1_Check Company Exists",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO companies (name, domain) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET domain = $2 RETURNING id",
+        "options": {
+          "queryReplacement": "{{ $('Company Filter').item.json.company }},{{ $('Domain Mapper').item.json.domain }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        2528,
+        608
+      ],
+      "id": "0b905030-0808-409e-b248-e6cef4abdb88",
+      "name": "2_Insert Company",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM jobs WHERE job_url = $1",
+        "options": {
+          "queryReplacement": "={{ $('Company Filter').item.json.link }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        2784,
+        608
+      ],
+      "id": "32e5b45b-fbe2-4755-9d1f-d1409248326d",
+      "name": "3_Check Job Exists",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO jobs (company_id, title, location, job_url, linkedin_job_id, job_description, match_score, status) VALUES ($1, $2, $3, $4, $5, $6, $7, 'scored') RETURNING id",
+        "options": {
+          "queryReplacement": "={{ $('2_Insert Company').item.json.id }},{{ $('Company Filter').item.json.title }},{{ $('Company Filter').item.json.location }},{{ $('Company Filter').item.json.link }},{{ $('Company Filter').item.json.link.split('/').pop() }},{{ $('Company Filter').item.json.jd }},{{ $('Edit Fields').item.json.job_match_score }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        3296,
+        592
+      ],
+      "id": "4fc7c439-2b5a-4802-9a2d-c327f6394822",
+      "name": "4_Insert Job",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  COALESCE(ec.id, NULL) as id,\n  COALESCE(ec.email, $1) as email,\n  COALESCE(ec.contact_count, 0) as contact_count,\n  COALESCE(ec.last_contacted, NULL) as last_contacted,\n  COALESCE(ec.response_count, 0) as response_count,\n  CASE \n    WHEN ec.last_contacted IS NULL THEN 999::INTEGER \n    ELSE EXTRACT(DAY FROM NOW() - ec.last_contacted)::INTEGER \n  END as days_since_last_contact,\n  CASE \n    WHEN ec.response_count > 0 THEN (ec.response_count::float / ec.contact_count) \n    ELSE 0 \n  END as response_rate\nFROM email_contacts ec \nWHERE ec.email = $1 AND ec.company_id = $2\nUNION ALL\nSELECT \n  NULL as id, \n  $1 as email, \n  0 as contact_count, \n  NULL as last_contacted, \n  0 as response_count, \n  999 as days_since_last_contact, \n  0 as response_rate\nWHERE NOT EXISTS (\n  SELECT 1 FROM email_contacts WHERE email = $1 AND company_id = $2\n)\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $('Code').item.json.value }},{{ $('2_Insert Company').item.json.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        2560,
+        928
+      ],
+      "id": "545642b2-2f79-4fc0-b13d-bad85d4bfd08",
+      "name": "5_Check Email History",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "contact_rules_check",
+              "leftValue": "={{ $json.days_since_last_contact }}",
+              "rightValue": 30,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            },
+            {
+              "id": "contact_count_check",
+              "leftValue": "={{ $json.contact_count || 0 }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2800,
+        928
+      ],
+      "id": "ffdf304b-0f90-4760-8979-3cd4318be082",
+      "name": "6_Email Contact Filter"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO email_contacts (company_id, email, confidence_score, source) VALUES ($1, $2, $3, $4) ON CONFLICT (company_id, email) DO UPDATE SET confidence_score = $3 RETURNING id",
+        "options": {
+          "queryReplacement": "={{ $('2_Insert Company').item.json.id }},{{ $('Code').item.json.value }},{{ $('Code').item.json.confidence }},hunter_hr"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        3088,
+        912
+      ],
+      "id": "0e0265f5-cba7-436e-b337-a20eb79f3f7a",
+      "name": "7_Store Email Contact",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "660bf626-decc-47eb-a8f2-4e5f9f6bdff2",
+              "leftValue": "={{ $json.value }}",
+              "rightValue": "Not Found",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3040,
+        256
+      ],
+      "id": "bb76b537-9eb3-4d14-9417-624c396dd11a",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Domain Mapper1').item.json.hunter_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2784,
+        1280
+      ],
+      "id": "8f216b1e-988e-4668-9876-5c06c3b06157",
+      "name": "Hunter Domain Search1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputData = $input.all();\nlet highestConfidenceEmail = null;\nlet maxConfidence = -1;\n\n// Process each input item\nfor (const item of inputData) {\n    // Check if emails array exists and has items\n    if (item.json.data && item.json.data.emails && item.json.data.emails.length > 0) {\n        const emails = item.json.data.emails;\n        \n        // Find the email with highest confidence\n        for (const email of emails) {\n            if (email.confidence > maxConfidence) {\n                maxConfidence = email.confidence;\n                highestConfidenceEmail = {\n                    value: email.value,\n                    confidence: email.confidence\n                };\n            }\n        }\n    }\n}\n\n// Return the highest confidence email or \"Not Found\" if none exists\nreturn [{\n    json: highestConfidenceEmail || {\n        value: \"Not Found\",\n        confidence: 0\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3072,
+        1280
+      ],
+      "id": "cf8ecdc1-f4c3-4cb9-8df6-58713e83df52",
+      "name": "Email confidence2"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3bdbb407-44de-43c2-bf60-61f4c4261400",
+              "name": "email",
+              "value": "={{ $('Email confidence2').item.json.value }}",
+              "type": "string"
+            },
+            {
+              "id": "company_id_fallback",
+              "name": "company_id",
+              "value": "={{ $('2_Insert Company1').item.json.id }}",
+              "type": "number"
+            },
+            {
+              "id": "911dc5ed-85fc-4b9b-82c8-2aa8056f1b7f",
+              "name": "id",
+              "value": "={{ $json.id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3360,
+        1904
+      ],
+      "id": "dec2c046-b78b-4f0d-98db-38e3b6eb519d",
+      "name": "Set Email"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "84396198-5d25-4928-a6e1-8627298a2043",
+              "leftValue": "={{ $json.value }}",
+              "rightValue": "Not Found",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3312,
+        1280
+      ],
+      "id": "03f789ea-8dc6-4456-a668-6c949ec208e8",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "chatgpt-4o-latest",
+          "mode": "list",
+          "cachedResultName": "CHATGPT-4O-LATEST"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Main Prompt:\nYou are an expert recruiter outreach specialist. Craft a personalized, compelling email that will get a recruiter's attention and prompt a response.\n\nInstructions:\nCreate a professional job application email (150-200 words max) that:\nSubject Line: Create an attention-grabbing subject mentioning 'Application for [Job Title]' and candidate's key strength\nOpening: Clearly state you're applying for the specific position and reference the job posting with the provided URL\nValue Proposition: Highlight 2-3 most relevant qualifications from the resume that directly match the job requirements\nSocial Proof: Include one quantifiable achievement if available\nCall to Action: Request an interview or conversation to discuss the opportunity\nProfessional Closing: Include resume, portfolio, and GitHub links naturally in the email body\n\nTone Requirements:\n- Confident but not arrogant\n- Specific, not generic\n- Results-focused\n- Professional yet personable\n\nOutput Format:\nReturn the response as a JSON object with exactly this structure:\n{\n\"toEmail\": \"Pass through the recipient's email address from input\",\n\"subject\": \"Compelling subject line here\",\n\"body\": \"Complete email body with proper formatting, including resume, portfolio, and GitHub links with professional closing\"\n}\n\nKey Rules:\n- MUST clearly state this is a job application for the posted position\n- MUST include the job posting URL in the email body for easy reference\n- MUST mention you found the job posting on LinkedIn\n- MUST include all three professional links naturally in the email body on separate lines:\n  Resume: https://docs.google.com/document/d/1RyNmI3YjCiacvPhRoqenr-YlL8Rgfs7y9gIA2jv5oQM/edit?tab=t.0\n  Portfolio: https://eswarsaiportfolio.org/\n  GitHub: https://github.com/ek-sai\n- Never use phrases like 'I hope this email finds you well'\n- Always lead with value and relevant qualifications\n- Include specific metrics when possible\n- Make all links contextual and professional, not awkward\n- End with a request for interview/discussion opportunity\n- CRITICAL: Return ONLY valid JSON format with \"toEmail\", \"subject\" and \"body\" keys\n- Include candidate name 'Eswar Sai Korrapati' and professional closing within the body text\n- Pass through the toEmail exactly as provided in input\n- Format the professional links section as:\n  \"Please find my professional materials below:\n  Resume: https://docs.google.com/document/d/1RyNmI3YjCiacvPhRoqenr-YlL8Rgfs7y9gIA2jv5oQM/edit?tab=t.0\n  Portfolio: https://eswarsaiportfolio.org/\n  GitHub: https://github.com/ek-sai\"\n\nInputs:\nCompany Name: {{ $('Parse').item.json.company }}\nJob Title: {{ $('Edit Fields').item.json.title }}\nJob Description: {{ $('Parse').item.json.jd }}\nCandidate Resume Data: {{ $('resume').item.json.resume }}\nJob Link:{{ $('Company Filter').item.json.link }}\ntoEmail: {{ $json.email }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        3664,
+        992
+      ],
+      "id": "7e7b8440-99ba-416b-95b0-04dac4c0ee5e",
+      "name": "Generate Email Structure",
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "YOUR_OPENAI_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ JSON.parse($('Generate Email Structure').item.json.message.content).subject }}",
+        "message": "={{ JSON.parse($('Generate Email Structure').item.json.message.content).body }}",
+        "options": {
+          "sendTo": "={{ JSON.parse($('Generate Email Structure').item.json.message.content).toEmail }}"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        4064,
+        992
+      ],
+      "id": "eeb53fff-97c4-494e-92c1-2e61e1b1ce0d",
+      "name": "Send Email",
+      "webhookId": "7f8f4994-8740-4717-8632-4919af9243a4",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "YOUR_GMAIL_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO applications (job_id, email_contact_id, subject, email_body, email_address) VALUES ($1, $2, $3, $4, $5)",
+        "options": {
+          "queryReplacement": "={{ $('Get Job id').item.json.id }},{{ $json.id }},{{ JSON.parse($('Generate Email Structure').item.json.message.content).subject }},{{ JSON.parse($('Generate Email Structure').item.json.message.content).body }}, {{ JSON.parse($('Generate Email Structure').item.json.message.content).toEmail}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        4784,
+        992
+      ],
+      "id": "8dfd8953-9c56-4358-97a7-061bf7f97ba9",
+      "name": "8_Log Application",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE email_contacts SET contact_count = contact_count + 1, last_contacted = NOW() WHERE id = $1",
+        "options": {
+          "queryReplacement": "={{ $('Get Email Contact').item.json.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        5072,
+        992
+      ],
+      "id": "04d40248-9436-4c90-8599-99207a771e62",
+      "name": "9_Update Contact Record",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  COALESCE(ec.id, NULL) as id,\n  COALESCE(ec.email, $1) as email,\n  COALESCE(ec.contact_count, 0) as contact_count,\n  COALESCE(ec.last_contacted, NULL) as last_contacted,\n  COALESCE(ec.response_count, 0) as response_count,\n  CASE \n    WHEN ec.last_contacted IS NULL THEN 999::INTEGER \n    ELSE EXTRACT(DAY FROM NOW() - ec.last_contacted)::INTEGER \n  END as days_since_last_contact,\n  CASE \n    WHEN ec.response_count > 0 THEN (ec.response_count::float / ec.contact_count) \n    ELSE 0 \n  END as response_rate\nFROM email_contacts ec \nWHERE ec.email = $1 AND ec.company_id = $2\nUNION ALL\nSELECT \n  NULL as id, \n  $1 as email, \n  0 as contact_count, \n  NULL as last_contacted, \n  0 as response_count, \n  999 as days_since_last_contact, \n  0 as response_rate\nWHERE NOT EXISTS (\n  SELECT 1 FROM email_contacts WHERE email = $1 AND company_id = $2\n)\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $('Email confidence2').item.json.value }},{{ $('2_Insert Company1').item.json.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        2528,
+        1920
+      ],
+      "id": "bfc8f16f-3e01-44f9-ac82-ca2b86fb3697",
+      "name": "5_Check Email History2",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "contact_rules_check2",
+              "leftValue": "={{ $json.days_since_last_contact }}",
+              "rightValue": 30,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            },
+            {
+              "id": "contact_count_check2",
+              "leftValue": "={{ $json.contact_count || 0 }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2800,
+        1920
+      ],
+      "id": "01002a93-6fe6-4d16-976a-a56c1f6e291d",
+      "name": "6_Email Contact Filter2"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO email_contacts (company_id, email, confidence_score, source) VALUES ($1, $2, $3, $4) ON CONFLICT (company_id, email) DO UPDATE SET confidence_score = $3 RETURNING id",
+        "options": {
+          "queryReplacement": "={{ $('2_Insert Company1').item.json.id }},{{ $('Email confidence2').item.json.value }},{{ $('Email confidence2').item.json.confidence }},hunter_general"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        3088,
+        1904
+      ],
+      "id": "b8ad1ce9-0b4c-4fef-bf2e-dea250e27b03",
+      "name": "7_Store Email Contact2",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7681b414-650b-488a-88fa-14ecccacf3ad",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "notExists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3072,
+        608
+      ],
+      "id": "e13cdcfd-4a57-434e-a808-c14b8d4e6da4",
+      "name": "Job_exists"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, company_id, title, location, job_url, match_score \nFROM jobs \nWHERE job_url = $1",
+        "options": {
+          "queryReplacement": "={{ $('Company Filter').item.json.link }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        4288,
+        992
+      ],
+      "id": "7f3dce7a-9cb0-4fc2-a11a-c289810b9d4b",
+      "name": "Get Job id",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3bdbb407-44de-43c2-bf60-61f4c4261400",
+              "name": "email",
+              "value": "={{ $('Code').item.json.value }}",
+              "type": "string"
+            },
+            {
+              "id": "company_id_fallback",
+              "name": "company_id",
+              "value": "={{ $('2_Insert Company').item.json.id }}",
+              "type": "number"
+            },
+            {
+              "id": "911dc5ed-85fc-4b9b-82c8-2aa8056f1b7f",
+              "name": "id",
+              "value": "={{ $json.id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3296,
+        912
+      ],
+      "id": "729653c9-ff63-42ea-bf6b-de42d55487ca",
+      "name": "Email2"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  COALESCE(id, 0) as id,\n  email, \n  contact_count, \n  last_contacted, \n  response_count, \n  company_id\nFROM email_contacts \nWHERE email = $1 AND company_id = $2\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ JSON.parse($('Generate Email Structure').item.json.message.content).toEmail }},{{ $json.company_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        4528,
+        992
+      ],
+      "id": "0a72f5f7-ae24-47a1-aeb3-2c1a526a8f4f",
+      "name": "Get Email Contact",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// N8N Code Node: Company Domain Mapper\n// Place this node BEFORE your Hunter.io HTTP Request node\n// This will map company names to their correct domains\n\nconst companyToDomainMapping = {\n  // FAANG + Big Tech\n  'google': 'google.com',\n  'alphabet': 'google.com',\n  'meta': 'meta.com',\n  'facebook': 'meta.com',\n  'amazon': 'amazon.com',\n  'apple': 'apple.com',\n  'netflix': 'netflix.com',\n  'microsoft': 'microsoft.com',\n  'tesla': 'tesla.com',\n  'nvidia': 'nvidia.com',\n  'salesforce': 'salesforce.com',\n  'oracle': 'oracle.com',\n  'adobe': 'adobe.com',\n  'intel': 'intel.com',\n  'amd': 'amd.com',\n  'qualcomm': 'qualcomm.com',\n  'cisco': 'cisco.com',\n  'ibm': 'ibm.com',\n  'servicenow': 'servicenow.com',\n  'workday': 'workday.com',\n  'snowflake': 'snowflake.com',\n  'databricks': 'databricks.com',\n  'palantir': 'palantir.com',\n  'uber': 'uber.com',\n  'lyft': 'lyft.com',\n  'airbnb': 'airbnb.com',\n  'doordash': 'doordash.com',\n  'shopify': 'shopify.com',\n  'stripe': 'stripe.com',\n  'square': 'squareup.com',\n  'block': 'block.xyz',\n  'zoom': 'zoom.us',\n  'slack': 'slack.com',\n  'atlassian': 'atlassian.com',\n  'dropbox': 'dropbox.com',\n  'spotify': 'spotify.com',\n  'twitter': 'twitter.com',\n  'x': 'x.com',\n  'linkedin': 'linkedin.com',\n  'tiktok': 'tiktok.com',\n  'bytedance': 'bytedance.com',\n  'snap': 'snap.com',\n  'snapchat': 'snap.com',\n  'reddit': 'reddit.com',\n  'pinterest': 'pinterest.com',\n  'discord': 'discord.com',\n  'twitch': 'twitch.tv',\n\n  // Financial Services & Banks\n  'jpmorgan': 'jpmorgan.com',\n  'jp morgan': 'jpmorgan.com',\n  'jpmorgan chase': 'jpmorgan.com',\n  'jp morgan chase': 'jpmorgan.com',\n  'goldman sachs': 'gs.com',\n  'morgan stanley': 'morganstanley.com',\n  'bank of america': 'bankofamerica.com',\n  'boa': 'bankofamerica.com',\n  'wells fargo': 'wellsfargo.com',\n  'citigroup': 'citigroup.com',\n  'citi': 'citigroup.com',\n  'american express': 'americanexpress.com',\n  'amex': 'americanexpress.com',\n  'visa': 'visa.com',\n  'mastercard': 'mastercard.com',\n  'paypal': 'paypal.com',\n  'charles schwab': 'schwab.com',\n  'fidelity': 'fidelity.com',\n  'blackrock': 'blackrock.com',\n  'vanguard': 'vanguard.com',\n  'capital one': 'capitalone.com',\n  'discover': 'discover.com',\n  'ally': 'ally.com',\n  'robinhood': 'robinhood.com',\n  'coinbase': 'coinbase.com',\n\n  // Consulting & Professional Services\n  'mckinsey': 'mckinsey.com',\n  'mckinsey & company': 'mckinsey.com',\n  'bain': 'bain.com',\n  'bain & company': 'bain.com',\n  'boston consulting group': 'bcg.com',\n  'bcg': 'bcg.com',\n  'accenture': 'accenture.com',\n  'deloitte': 'deloitte.com',\n  'pwc': 'pwc.com',\n  'pricewaterhousecoopers': 'pwc.com',\n  'ernst & young': 'ey.com',\n  'ey': 'ey.com',\n  'kpmg': 'kpmg.com',\n\n  // Healthcare & Pharma\n  'johnson & johnson': 'jnj.com',\n  'j&j': 'jnj.com',\n  'pfizer': 'pfizer.com',\n  'moderna': 'modernatx.com',\n  'abbott': 'abbott.com',\n  'medtronic': 'medtronic.com',\n  'unitedhealth': 'unitedhealthgroup.com',\n  'united health': 'unitedhealthgroup.com',\n  'anthem': 'anthem.com',\n  'aetna': 'aetna.com',\n  'humana': 'humana.com',\n  'cigna': 'cigna.com',\n\n  // Retail & E-commerce\n  'walmart': 'walmart.com',\n  'target': 'target.com',\n  'costco': 'costco.com',\n  'home depot': 'homedepot.com',\n  'lowes': 'lowes.com',\n  'macys': 'macys.com',\n  'nordstrom': 'nordstrom.com',\n  'best buy': 'bestbuy.com',\n\n  // Automotive\n  'ford': 'ford.com',\n  'general motors': 'gm.com',\n  'gm': 'gm.com',\n  'toyota': 'toyota.com',\n  'honda': 'honda.com',\n  'bmw': 'bmw.com',\n  'mercedes': 'mercedes-benz.com',\n  'mercedes-benz': 'mercedes-benz.com',\n  'volkswagen': 'vw.com',\n  'audi': 'audi.com',\n  'porsche': 'porsche.com',\n  'ferrari': 'ferrari.com',\n  'lamborghini': 'lamborghini.com',\n\n  // Airlines & Travel\n  'delta': 'delta.com',\n  'american airlines': 'aa.com',\n  'united airlines': 'united.com',\n  'southwest': 'southwest.com',\n  'jetblue': 'jetblue.com',\n  'expedia': 'expedia.com',\n  'booking': 'booking.com',\n  'marriott': 'marriott.com',\n  'hilton': 'hilton.com',\n  'hyatt': 'hyatt.com',\n  'sephora': 'sephora.com',\n\n  // Media & Entertainment\n  'disney': 'disney.com',\n  'warner bros': 'warnerbros.com',\n  'comcast': 'comcast.com',\n  'verizon': 'verizon.com',\n  'at&t': 'att.com',\n  'att': 'att.com',\n  'tmobile': 't-mobile.com',\n  't-mobile': 't-mobile.com',\n  'sprint': 't-mobile.com',\n\n  // Energy & Utilities\n  'exxonmobil': 'exxonmobil.com',\n  'exxon': 'exxonmobil.com',\n  'chevron': 'chevron.com',\n  'shell': 'shell.com',\n  'bp': 'bp.com',\n  'conocophillips': 'conocophillips.com',\n\n  // Startups & Unicorns\n  'openai': 'openai.com',\n  'anthropic': 'anthropic.com',\n  'figma': 'figma.com',\n  'notion': 'notion.so',\n  'canva': 'canva.com',\n  'airtable': 'airtable.com',\n  'hubspot': 'hubspot.com',\n  'mailchimp': 'mailchimp.com',\n  'zendesk': 'zendesk.com',\n  'twilio': 'twilio.com',\n  'datadog': 'datadog.com',\n  'okta': 'okta.com',\n  'cloudflare': 'cloudflare.com',\n  'mongodb': 'mongodb.com',\n  'elastic': 'elastic.co',\n  'hashicorp': 'hashicorp.com',\n  'gitlab': 'gitlab.com',\n  'github': 'github.com',\n  'bitbucket': 'atlassian.com',\n  'jira': 'atlassian.com',\n  'confluence': 'atlassian.com',  // <-- Added missing comma here\n  'arteraai': 'artera.ai'\n};\n\n// Get the company name from previous node\nconst inputCompany = $('Company Filter').item.json.company;\n\n// Normalize the company name for matching\nfunction normalizeCompanyName(name) {\n  return name.toLowerCase()\n    .replace(/[.,\\/#!$%\\^&\\*;:{}=\\-_`~()]/g, '') // Remove special chars\n    .replace(/\\s+/g, ' ') // Multiple spaces to single space\n    .trim()\n    .replace(/ inc$/i, '')\n    .replace(/ llc$/i, '')\n    .replace(/ ltd$/i, '')\n    .replace(/ corp$/i, '')\n    .replace(/ corporation$/i, '')\n    .replace(/ company$/i, '')\n    .replace(/ co$/i, '')\n    .replace(/ & co$/i, '')\n    .replace(/^the /i, '');\n}\n\nconst normalizedCompany = normalizeCompanyName(inputCompany);\n\n// Function to find domain\nfunction findCompanyDomain(companyName) {\n  const normalized = normalizeCompanyName(companyName);\n  \n  // Direct match\n  if (companyToDomainMapping[normalized]) {\n    return companyToDomainMapping[normalized];\n  }\n  \n  // Partial match - check if any key contains the company name or vice versa\n  for (const [key, domain] of Object.entries(companyToDomainMapping)) {\n    if (normalized.includes(key) || key.includes(normalized)) {\n      return domain;\n    }\n  }\n  \n  // Fallback strategies\n  const cleanName = normalized.replace(/\\s+/g, '');\n  \n  // Common domain patterns to try\n  const possibleDomains = [\n    `${cleanName}.com`,\n    `${cleanName}.co`,\n    `${cleanName}.net`,\n    `${cleanName}.org`\n  ];\n  \n  return possibleDomains[0]; // Default to .com\n}\n\n// Get the domain\nconst domain = findCompanyDomain(inputCompany);\n\n// Construct the Hunter.io URL\nconst hunterUrl = `https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=YOUR_HUNTER_API_KEY&department=hr`;\n\n// Debug information\nconst debugInfo = {\n  original_company: inputCompany,\n  normalized_company: normalizedCompany,\n  mapped_domain: domain,\n  hunter_url: hunterUrl,\n  mapping_source: companyToDomainMapping[normalizedCompany] ? 'direct_mapping' : 'fallback'\n};\n\nconsole.log('Domain Mapping Debug:', debugInfo);\n\n// Return the data for the next node\nreturn [{\n  json: {\n    company: inputCompany,\n    domain: domain,\n    hunter_url: hunterUrl,\n    debug: debugInfo\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        256
+      ],
+      "id": "79e253ba-3611-484a-aba7-9f11714c3d54",
+      "name": "Domain Mapper"
+    },
+    {
+      "parameters": {
+        "jsCode": "// N8N Code Node: Company Domain Mapper\n// Place this node BEFORE your Hunter.io HTTP Request node\n// This will map company names to their correct domains\n\nconst companyToDomainMapping = {\n  // FAANG + Big Tech\n  'google': 'google.com',\n  'alphabet': 'google.com',\n  'meta': 'meta.com',\n  'facebook': 'meta.com',\n  'amazon': 'amazon.com',\n  'apple': 'apple.com',\n  'netflix': 'netflix.com',\n  'microsoft': 'microsoft.com',\n  'tesla': 'tesla.com',\n  'nvidia': 'nvidia.com',\n  'salesforce': 'salesforce.com',\n  'oracle': 'oracle.com',\n  'adobe': 'adobe.com',\n  'intel': 'intel.com',\n  'amd': 'amd.com',\n  'qualcomm': 'qualcomm.com',\n  'cisco': 'cisco.com',\n  'ibm': 'ibm.com',\n  'servicenow': 'servicenow.com',\n  'workday': 'workday.com',\n  'snowflake': 'snowflake.com',\n  'databricks': 'databricks.com',\n  'palantir': 'palantir.com',\n  'uber': 'uber.com',\n  'lyft': 'lyft.com',\n  'airbnb': 'airbnb.com',\n  'doordash': 'doordash.com',\n  'shopify': 'shopify.com',\n  'stripe': 'stripe.com',\n  'square': 'squareup.com',\n  'block': 'block.xyz',\n  'zoom': 'zoom.us',\n  'slack': 'slack.com',\n  'atlassian': 'atlassian.com',\n  'dropbox': 'dropbox.com',\n  'spotify': 'spotify.com',\n  'twitter': 'twitter.com',\n  'x': 'x.com',\n  'linkedin': 'linkedin.com',\n  'tiktok': 'tiktok.com',\n  'bytedance': 'bytedance.com',\n  'snap': 'snap.com',\n  'snapchat': 'snap.com',\n  'reddit': 'reddit.com',\n  'pinterest': 'pinterest.com',\n  'discord': 'discord.com',\n  'twitch': 'twitch.tv',\n\n  // Financial Services & Banks\n  'jpmorgan': 'jpmorgan.com',\n  'jp morgan': 'jpmorgan.com',\n  'jpmorgan chase': 'jpmorgan.com',\n  'jp morgan chase': 'jpmorgan.com',\n  'goldman sachs': 'gs.com',\n  'morgan stanley': 'morganstanley.com',\n  'bank of america': 'bankofamerica.com',\n  'boa': 'bankofamerica.com',\n  'wells fargo': 'wellsfargo.com',\n  'citigroup': 'citigroup.com',\n  'citi': 'citigroup.com',\n  'american express': 'americanexpress.com',\n  'amex': 'americanexpress.com',\n  'visa': 'visa.com',\n  'mastercard': 'mastercard.com',\n  'paypal': 'paypal.com',\n  'charles schwab': 'schwab.com',\n  'fidelity': 'fidelity.com',\n  'blackrock': 'blackrock.com',\n  'vanguard': 'vanguard.com',\n  'capital one': 'capitalone.com',\n  'discover': 'discover.com',\n  'ally': 'ally.com',\n  'robinhood': 'robinhood.com',\n  'coinbase': 'coinbase.com',\n\n  // Consulting & Professional Services\n  'mckinsey': 'mckinsey.com',\n  'mckinsey & company': 'mckinsey.com',\n  'bain': 'bain.com',\n  'bain & company': 'bain.com',\n  'boston consulting group': 'bcg.com',\n  'bcg': 'bcg.com',\n  'accenture': 'accenture.com',\n  'deloitte': 'deloitte.com',\n  'pwc': 'pwc.com',\n  'pricewaterhousecoopers': 'pwc.com',\n  'ernst & young': 'ey.com',\n  'ey': 'ey.com',\n  'kpmg': 'kpmg.com',\n\n  // Healthcare & Pharma\n  'johnson & johnson': 'jnj.com',\n  'j&j': 'jnj.com',\n  'pfizer': 'pfizer.com',\n  'moderna': 'modernatx.com',\n  'abbott': 'abbott.com',\n  'medtronic': 'medtronic.com',\n  'unitedhealth': 'unitedhealthgroup.com',\n  'united health': 'unitedhealthgroup.com',\n  'anthem': 'anthem.com',\n  'aetna': 'aetna.com',\n  'humana': 'humana.com',\n  'cigna': 'cigna.com',\n\n  // Retail & E-commerce\n  'walmart': 'walmart.com',\n  'target': 'target.com',\n  'costco': 'costco.com',\n  'home depot': 'homedepot.com',\n  'lowes': 'lowes.com',\n  'macys': 'macys.com',\n  'nordstrom': 'nordstrom.com',\n  'best buy': 'bestbuy.com',\n\n  // Automotive\n  'ford': 'ford.com',\n  'general motors': 'gm.com',\n  'gm': 'gm.com',\n  'toyota': 'toyota.com',\n  'honda': 'honda.com',\n  'bmw': 'bmw.com',\n  'mercedes': 'mercedes-benz.com',\n  'mercedes-benz': 'mercedes-benz.com',\n  'volkswagen': 'vw.com',\n  'audi': 'audi.com',\n  'porsche': 'porsche.com',\n  'ferrari': 'ferrari.com',\n  'lamborghini': 'lamborghini.com',\n\n  // Airlines & Travel\n  'delta': 'delta.com',\n  'american airlines': 'aa.com',\n  'united airlines': 'united.com',\n  'southwest': 'southwest.com',\n  'jetblue': 'jetblue.com',\n  'expedia': 'expedia.com',\n  'booking': 'booking.com',\n  'marriott': 'marriott.com',\n  'hilton': 'hilton.com',\n  'hyatt': 'hyatt.com',\n  'sephora': 'sephora.com',\n\n  // Media & Entertainment\n  'disney': 'disney.com',\n  'warner bros': 'warnerbros.com',\n  'comcast': 'comcast.com',\n  'verizon': 'verizon.com',\n  'at&t': 'att.com',\n  'att': 'att.com',\n  'tmobile': 't-mobile.com',\n  't-mobile': 't-mobile.com',\n  'sprint': 't-mobile.com',\n\n  // Energy & Utilities\n  'exxonmobil': 'exxonmobil.com',\n  'exxon': 'exxonmobil.com',\n  'chevron': 'chevron.com',\n  'shell': 'shell.com',\n  'bp': 'bp.com',\n  'conocophillips': 'conocophillips.com',\n\n  // Startups & Unicorns\n  'openai': 'openai.com',\n  'anthropic': 'anthropic.com',\n  'figma': 'figma.com',\n  'notion': 'notion.so',\n  'canva': 'canva.com',\n  'airtable': 'airtable.com',\n  'hubspot': 'hubspot.com',\n  'mailchimp': 'mailchimp.com',\n  'zendesk': 'zendesk.com',\n  'twilio': 'twilio.com',\n  'datadog': 'datadog.com',\n  'okta': 'okta.com',\n  'cloudflare': 'cloudflare.com',\n  'mongodb': 'mongodb.com',\n  'elastic': 'elastic.co',\n  'hashicorp': 'hashicorp.com',\n  'gitlab': 'gitlab.com',\n  'github': 'github.com',\n  'bitbucket': 'atlassian.com',\n  'jira': 'atlassian.com',\n  'confluence': 'atlassian.com',  // <-- Added missing comma here\n  'arteraai': 'artera.ai'\n};\n\n// Get the company name from previous node\nconst inputCompany = $('Company Filter').item.json.company;\n\n// Normalize the company name for matching\nfunction normalizeCompanyName(name) {\n  return name.toLowerCase()\n    .replace(/[.,\\/#!$%\\^&\\*;:{}=\\-_`~()]/g, '') // Remove special chars\n    .replace(/\\s+/g, ' ') // Multiple spaces to single space\n    .trim()\n    .replace(/ inc$/i, '')\n    .replace(/ llc$/i, '')\n    .replace(/ ltd$/i, '')\n    .replace(/ corp$/i, '')\n    .replace(/ corporation$/i, '')\n    .replace(/ company$/i, '')\n    .replace(/ co$/i, '')\n    .replace(/ & co$/i, '')\n    .replace(/^the /i, '');\n}\n\nconst normalizedCompany = normalizeCompanyName(inputCompany);\n\n// Function to find domain\nfunction findCompanyDomain(companyName) {\n  const normalized = normalizeCompanyName(companyName);\n  \n  // Direct match\n  if (companyToDomainMapping[normalized]) {\n    return companyToDomainMapping[normalized];\n  }\n  \n  // Partial match - check if any key contains the company name or vice versa\n  for (const [key, domain] of Object.entries(companyToDomainMapping)) {\n    if (normalized.includes(key) || key.includes(normalized)) {\n      return domain;\n    }\n  }\n  \n  // Fallback strategies\n  const cleanName = normalized.replace(/\\s+/g, '');\n  \n  // Common domain patterns to try\n  const possibleDomains = [\n    `${cleanName}.com`,\n    `${cleanName}.co`,\n    `${cleanName}.net`,\n    `${cleanName}.org`\n  ];\n  \n  return possibleDomains[0]; // Default to .com\n}\n\n// Get the domain\nconst domain = findCompanyDomain(inputCompany);\n\n// Construct the Hunter.io URL\nconst hunterUrl = `https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=YOUR_HUNTER_API_KEY`;\n\n// Debug information\nconst debugInfo = {\n  original_company: inputCompany,\n  normalized_company: normalizedCompany,\n  mapped_domain: domain,\n  hunter_url: hunterUrl,\n  mapping_source: companyToDomainMapping[normalizedCompany] ? 'direct_mapping' : 'fallback'\n};\n\nconsole.log('Domain Mapping Debug:', debugInfo);\n\n// Return the data for the next node\nreturn [{\n  json: {\n    company: inputCompany,\n    domain: domain,\n    hunter_url: hunterUrl,\n    debug: debugInfo\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2560,
+        1280
+      ],
+      "id": "0399750d-d0f6-4cfa-9550-c99f3230d85f",
+      "name": "Domain Mapper1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputData = $input.all();\nlet highestConfidenceEmail = null;\nlet maxConfidence = -1;\n\n// Process each input item\nfor (const item of inputData) {\n    // Check if emails array exists and has items\n    if (item.json.data && item.json.data.emails && item.json.data.emails.length > 0) {\n        const emails = item.json.data.emails;\n        \n        // Find the email with highest confidence\n        for (const email of emails) {\n            if (email.confidence > maxConfidence) {\n                maxConfidence = email.confidence;\n                highestConfidenceEmail = {\n                    value: email.value,\n                    confidence: email.confidence\n                };\n            }\n        }\n    }\n}\n\n// Return the highest confidence email or \"Not Found\" if none exists\nreturn [{\n    json: highestConfidenceEmail || {\n        value: \"Not Found\",\n        confidence: 0\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2816,
+        256
+      ],
+      "id": "6e0e54d9-aa20-42ae-952a-5093aae51a50",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM companies WHERE name = $1",
+        "options": {
+          "queryReplacement": "={{ $('Edit Fields').item.json.company }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        2496,
+        1616
+      ],
+      "id": "8bb50914-0d95-45d3-bdfb-6deb88d2452e",
+      "name": "1_Check Company Exists1",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO companies (name, domain) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET domain = $2 RETURNING id",
+        "options": {
+          "queryReplacement": "{{ $('Company Filter').item.json.company }},{{ $('Domain Mapper1').item.json.domain }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        2736,
+        1616
+      ],
+      "id": "c1ef346b-83ef-41ec-bf67-4b376e0e7d75",
+      "name": "2_Insert Company1",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM jobs WHERE job_url = $1",
+        "options": {
+          "queryReplacement": "={{ $('Company Filter').item.json.link }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        2976,
+        1616
+      ],
+      "id": "5ebb44b4-d3cd-4e1c-8f15-f70811930c19",
+      "name": "3_Check Job Exists1",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7681b414-650b-488a-88fa-14ecccacf3ad",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "notExists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3152,
+        1616
+      ],
+      "id": "1f47ade1-c8d3-47ca-8f76-4a1074f05be0",
+      "name": "Job_exists1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO jobs (company_id, title, location, job_url, linkedin_job_id, job_description, match_score, status) VALUES ($1, $2, $3, $4, $5, $6, $7, 'scored') RETURNING id",
+        "options": {
+          "queryReplacement": "={{ $('2_Insert Company1').item.json.id }},{{ $('Company Filter').item.json.title }},{{ $('Company Filter').item.json.location }},{{ $('Company Filter').item.json.link }},{{ $('Company Filter').item.json.link.split('/').pop() }},{{ $('Company Filter').item.json.jd }},{{ $('Edit Fields').item.json.job_match_score }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        3408,
+        1600
+      ],
+      "id": "f3e04746-19f5-4aa5-9534-73dcf08ff1de",
+      "name": "4_Insert Job1",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "YOUR_POSTGRES_CREDENTIAL_NAME"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "resume",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "resume": {
+      "main": [
+        [
+          {
+            "node": "Scrape Last 24 hours Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Last 24 hours Job": {
+      "main": [
+        [
+          {
+            "node": "Extract Job Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Job Links": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Each Job": {
+      "main": [
+        [
+          {
+            "node": "Parse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Scrape Each Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse": {
+      "main": [
+        [
+          {
+            "node": "Company Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Company Filter": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Score Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Filter": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Domain Mapper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hunter Domain Search": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1_Check Company Exists": {
+      "main": [
+        [
+          {
+            "node": "2_Insert Company",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2_Insert Company": {
+      "main": [
+        [
+          {
+            "node": "3_Check Job Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3_Check Job Exists": {
+      "main": [
+        [
+          {
+            "node": "Job_exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4_Insert Job": {
+      "main": [
+        [
+          {
+            "node": "5_Check Email History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "1_Check Company Exists",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Domain Mapper1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5_Check Email History": {
+      "main": [
+        [
+          {
+            "node": "6_Email Contact Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6_Email Contact Filter": {
+      "main": [
+        [
+          {
+            "node": "7_Store Email Contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7_Store Email Contact": {
+      "main": [
+        [
+          {
+            "node": "Email2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hunter Domain Search1": {
+      "main": [
+        [
+          {
+            "node": "Email confidence2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email confidence2": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "1_Check Company Exists1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5_Check Email History2": {
+      "main": [
+        [
+          {
+            "node": "6_Email Contact Filter2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6_Email Contact Filter2": {
+      "main": [
+        [
+          {
+            "node": "7_Store Email Contact2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7_Store Email Contact2": {
+      "main": [
+        [
+          {
+            "node": "Set Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Email": {
+      "main": [
+        [
+          {
+            "node": "Generate Email Structure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Email Structure": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Get Job id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "8_Log Application": {
+      "main": [
+        [
+          {
+            "node": "9_Update Contact Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "9_Update Contact Record": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Job_exists": {
+      "main": [
+        [
+          {
+            "node": "4_Insert Job",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "5_Check Email History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Job id": {
+      "main": [
+        [
+          {
+            "node": "Get Email Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email2": {
+      "main": [
+        [
+          {
+            "node": "Generate Email Structure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Email Contact": {
+      "main": [
+        [
+          {
+            "node": "8_Log Application",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Domain Mapper": {
+      "main": [
+        [
+          {
+            "node": "Hunter Domain Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Domain Mapper1": {
+      "main": [
+        [
+          {
+            "node": "Hunter Domain Search1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1_Check Company Exists1": {
+      "main": [
+        [
+          {
+            "node": "2_Insert Company1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2_Insert Company1": {
+      "main": [
+        [
+          {
+            "node": "3_Check Job Exists1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3_Check Job Exists1": {
+      "main": [
+        [
+          {
+            "node": "Job_exists1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Job_exists1": {
+      "main": [
+        [
+          {
+            "node": "4_Insert Job1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "5_Check Email History2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4_Insert Job1": {
+      "main": [
+        [
+          {
+            "node": "5_Check Email History2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "bba0355a-c88b-446f-ab89-c94354ca4f50",
+  "meta": {
+    "instanceId": "d5812632ee6ed72dfd5ee9227773feca96dbc5d099c19238ecbeb108e4d20d6d"
+  },
+  "id": "SMBqEUwMmRcHQRRP",
+  "tags": []
+}
